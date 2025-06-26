@@ -5,6 +5,17 @@ from django.http import HttpResponseRedirect
 from . import util
 import markdown2
 
+def get_case_insensitive_entry(title):
+    """
+    Helper function to get the correct-cased entry filename for a given title (case-insensitive).
+    Returns (entry_title, content) if found, else (None, None).
+    """
+    entries = util.list_entries()
+    for entry in entries:
+        if entry.lower() == title.lower():
+            return entry, util.get_entry(entry)
+    return None, None
+
 def index(request):
     """
     Show all encyclopedia entries.
@@ -19,14 +30,14 @@ def entry(request, title):
     Display a single encyclopedia entry, converting Markdown to HTML.
     If not found, show an error page.
     """
-    content = util.get_entry(title)
+    entry_title, content = get_case_insensitive_entry(title)
     if content is None:
         return render(request, "encyclopedia/error.html", {
             "message": "The requested page was not found."
         })
     html_content = markdown2.markdown(content)
     return render(request, "encyclopedia/entry.html", {
-        "title": title,
+        "title": entry_title,
         "content": html_content
     })
 
@@ -38,18 +49,16 @@ def search(request):
     if request.method == "GET":
         q = request.GET.get("q", "")
         entries = util.list_entries()
-        if q.lower() in [entry.lower() for entry in entries]:
-            # Redirect to the matched entry (case-insensitive)
-            for entry_name in entries:
-                if entry_name.lower() == q.lower():
-                    return redirect("entry", title=entry_name)
-        else:
-            # Find all entries containing the substring (case-insensitive)
-            results = [entry for entry in entries if q.lower() in entry.lower()]
-            return render(request, "encyclopedia/search.html", {
-                "query": q,
-                "results": results
-            })
+        # Exact match (case-insensitive)
+        for entry in entries:
+            if entry.lower() == q.lower():
+                return redirect("entry", title=entry)
+        # Partial match (case-insensitive)
+        results = [entry for entry in entries if q.lower() in entry.lower()]
+        return render(request, "encyclopedia/search.html", {
+            "query": q,
+            "results": results
+        })
 
 def new(request):
     """
@@ -62,9 +71,14 @@ def new(request):
         content = request.POST.get("content", "")
         entries = util.list_entries()
         # Check for duplicate (case-insensitive)
-        if title == "" or any(entry.lower() == title.lower() for entry in entries):
+        for entry in entries:
+            if entry.lower() == title.lower():
+                return render(request, "encyclopedia/error.html", {
+                    "message": "Entry with this title already exists or title is invalid."
+                })
+        if title == "":
             return render(request, "encyclopedia/error.html", {
-                "message": "Entry with this title already exists or title is invalid."
+                "message": "Title cannot be empty."
             })
         util.save_entry(title, content)
         return redirect("entry", title=title)
@@ -76,18 +90,22 @@ def edit(request, title):
     GET: Show edit form pre-filled with Markdown content.
     POST: Save changes and redirect to entry page.
     """
+    entry_title, content = get_case_insensitive_entry(title)
     if request.method == "POST":
-        content = request.POST.get("content", "")
-        util.save_entry(title, content)
-        return redirect("entry", title=title)
+        new_content = request.POST.get("content", "")
+        if entry_title is None:
+            return render(request, "encyclopedia/error.html", {
+                "message": "The requested page was not found."
+            })
+        util.save_entry(entry_title, new_content)
+        return redirect("entry", title=entry_title)
     else:
-        content = util.get_entry(title)
         if content is None:
             return render(request, "encyclopedia/error.html", {
                 "message": "The requested page was not found."
             })
         return render(request, "encyclopedia/edit.html", {
-            "title": title,
+            "title": entry_title,
             "content": content
         })
 
